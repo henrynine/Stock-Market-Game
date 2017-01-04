@@ -1,14 +1,12 @@
-#export PATH=$PATH:/Users/Next/Public/Programming/Drivers/
+#export PATH=$PATH:/Users/henrymiddleton/Documents/Programming/Drivers/
 
 '''
 need to record: (optional)
-
 total equity on each date: (open, close)
 ranking on each date: (open, close)
 cash balance: (open, close)
 longs: (open, close)
 update previous purchases
-
 track each trade/upkeep:
 buy, sell, or keep
 date
@@ -16,10 +14,8 @@ volume
 price per share at trade
 symbol/company name
 price per share increase since purchase
-
 issue that price is 20 minutes after purchases
 so make a list of purchases, then wait 25 minutes and scrape for price
-
 for later comparison, check portfolio against buy price of any previous transactions, if they match, give difference
 or: maybe better: add up transactions to see what purchases are?
 or: since stocks are only bought and sold en masse, compare current holdings to most recent purchase of that stock (i like this best rn)
@@ -32,8 +28,8 @@ from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 #need to install yahoo_finance, selenium, potentially geckodriver and add to path
 
-USERNAME = 'user'
-PASSWORD = 'pw'
+USERNAME = 'NY6_34_A233'
+PASSWORD = 'SRQ12983'
 DOWJONES = ['AAPL', 'AXP', 'BA', 'CAT', 'CSCO', 'CVX', 'KO', 'DD', 'XOM', 'GE', 'GS', 'HD', 'IBM', 'INTC', 'JNJ',
             'JPM', 'MCD', 'MMM', 'MRK', 'MSFT', 'NKE', 'PFE', 'PG', 'TRV', 'UNH', 'UTX', 'V', 'VZ', 'WMT', 'DIS']
 HOLIDAYS = ['2016-01-01', '2016-01-18', '2016-02-15', '2016-03-25', '2016-05-30',
@@ -44,6 +40,9 @@ PORTFOLIO_ELEMENTS = ['Symbol', 'Position', 'Shares', 'Last Trade Date', 'Net Co
 
 def get_time():
     return str(datetime.datetime.now())[:-7]
+
+def get_date():
+    return get_time()[:10]
 
 def fifty_percent_change(share):
     return round(float(share.get_percent_change_from_50_day_moving_average()[:-1])/100, 6)
@@ -130,10 +129,6 @@ class StockBot:
         #finalize trade
         self.click_by_id('btnConfirmTrade')
         #record trade
-        if is_buying:
-            prefix = 'Bought'
-        else:
-            prefix = 'Sold'
 
         time.sleep(.5)#magic
 
@@ -141,36 +136,35 @@ class StockBot:
         print(confirmation)
 
         if 'Trade Order Confirmed' in confirmation:#record trade if it went through
-            message = prefix + ' %s shares of %s at $%s per share' % (share_count, ticker_symbol, Share(ticker_symbol).get_price())
-            print(message)
-            return Purchase(ticker_symbol, share_count)
             if is_buying == True:
+                message = 'Bought %s shares of %s, buy price TBD' % (share_count, ticker_symbol)
+                print(message)
                 self.purchased_pending_pricing.append(ticker_symbol)
             else:#selling
-                pass#todo
+                message = 'Sold %s shares of %s' % (share_count, ticker_symbol)
+                print(message)
 
     def go_to_page(self, page):#janky but it works
         if page not in self.driver.current_url:
-            button = self.driver.find_elements_by_xpath("//a[@href=\'"+page+"\']")[0]
-            button.click()
+            '''button = self.driver.find_elements_by_xpath("//a[@href=\'"+page+"\']")[0]
+            button.click()'''
+            self.driver.get('http://www.smgww.org/' + page)
+            time.sleep(.5)#allow page to load
 
     def get_cash(self):
         self.go_to_page('pa.html')
-        time.sleep(5)#allow page to load
         cash = self.driver.find_element_by_id('dvCashBalance').text
-        return float((cash[1:]).replace(',', ''))#return cash properly formatted as float
+        return float(((cash.split('$')[1]).replace(',', '')).replace(')', ''))#return cash properly formatted as float
 
     def get_longs(self):
         self.go_to_page('pa.html')
-        time.sleep(5)
         longs = self.driver.find_element_by_id('dvTotalLongs').text
-        return float((longs[1:]).replace(',', ''))#return longs value properly formatted as float
+        return float(((longs.split('$')[1]).replace(',', '')).replace(')', ''))#return longs value properly formatted as float
 
     def get_equity(self):
         self.go_to_page('pa.html')
-        time.sleep(5)
         longs = self.driver.find_element_by_id('dvTotalEquity').text
-        return float((longs[1:]).replace(',', ''))#return equity properly formatted as float
+        return float(((longs.split('$')[1]).replace(',', '')).replace(')', ''))#return equity properly formatted as float
 
     def get_table_entries(self, table):
         body = table.find_element_by_tag_name('tbody')
@@ -184,7 +178,7 @@ class StockBot:
             rows_list_form.append(this_row_list_form)
         return rows_list_form
 
-    def get_transactions(self, date):
+    def get_transactions(self):
         #dateformat = 'YYYY-MM-DD'
         '''
         scrape all transactions from tnotes.html
@@ -212,17 +206,25 @@ class StockBot:
 
         return all_transactions
 
+    def get_transactions_by_date(self, date):
+        all_transactions = self.get_transactions()
+        transactions_today = []
+        for transaction in all_transactions:
+            if transaction[4][:10] == date[:10]:
+                transactions_today.append(transaction)
+        return transactions_today
+
 
 
     def get_portfolio(self):
         if not 'ahold.html' in self.driver.current_url:
             self.driver.get('http://www.smgww.org/ahold.html')#works here i think
-        time.sleep(.5)
+        time.sleep(1)
         holdings_table = self.driver.find_element_by_class_name('google-visualization-table-table')
         row_entries = self.get_table_entries(holdings_table)
+        holdings = []
         for row in row_entries:
-            for num in range(len(PORTFOLIO_ELEMENTS)):
-                entry[PORTFOLIO_ELEMENTS[num]] = row[num]
+            entry = {row[0]: row[2]}
             holdings.append(entry)
         return holdings
 
@@ -278,27 +280,76 @@ class StockBot:
         return purchases#{symbol: num shares}
 
     def initiate(self):
-        self.sell_all()
+        #self.sell_all()
         purchases = self.buy_below_mean(self.get_cash())
         for symbol in purchases:
             self.move_stock(symbol, purchases[symbol], True)
+        if str(input('Wait and record stocks now? (y/n)')).lower() == 'y':
+                time.sleep(1500)#wait 25 minutes
+                self.log_purchases(get_date())
+        else:
+            print('Make sure to log the purchases later.')
+
+
+
         #wait 25 mins, record prices from get_transactions
         #or maybe get transactions from most recent day and do those stats so no 25 minute wait
 
+    def log_purchases(self, date):
+        transactions = self.get_transactions_by_date(date)#get today's (or custom's) transactions
+        for transaction in transactions:
+            symbol = transaction[1]
+            count = transaction[2]
+            price = transaction[6].split('$')[1]
+            message = 'Bought %s shares of %s at a net cost of %s per share' % (count, symbol, price)
+            print(message)
+            with open(('purchases/%s_%s.txt' % (date, symbol)), 'w') as log:
+                log.write(message)
+
     def daily_stats(self):
-        return '''Equity: %s Ranking: %s Cash: %s Longs: %s''' % (self.get_equity(), self.get_ranking(), self.get_cash(), self.get_longs())
+        message = get_date() + ''': Equity: %s Ranking: %s Cash: %s Longs: %s''' % (self.get_equity(), self.get_ranking(), self.get_cash(), self.get_longs())
+        print(message)
+        with open('dailylog.txt', 'a') as log:
+            log.write('\n'+message)
 
 
     def maintain(self):
         portfolio = self.get_portfolio()#{symbol: num shares}
-
+        print('got portfolio')
         to_sell = {}
         liquidation_profit = 0#idk if you can spend cash you will have but don't yet
 
-        for symbol in portfolio:
+        for entry in portfolio:
+            #{symbol: value}
+            #hackish but
+            for key in entry:
+                symbol = key
+            share_count = int(entry[symbol])
+            stock = Share(symbol)
+
+            print('Created share for %s' % symbol)
             if fifty_percent_change(stock) > 0:#if price is above the fifty day average, sell it
-                price = stock.get_price()
-                to_sell[symbol] = price
-                liquidation_profit += price*portfolio[symbol]
+                print('Should sell %s' % symbol)
+                price = float(stock.get_price())
+                to_sell[symbol] = share_count
+                liquidation_profit += price*share_count
+
+
+        if len(to_sell) > 0:
+            print('Stocks to sell: %s' % to_sell)
+        else:
+            print('No changes.')
+
+        #sell Stocks
+        for stock in to_sell:
+            self.move_stock(stock, to_sell[stock], 0)#0 means sell
+            print('Sold %s shares of %s at %s per share' % (to_sell[stock], stock, Share(stock).get_price()))
 
         return self.buy_below_mean(liquidation_profit)
+
+    def update_stocks(self, stocks_to_update, original_date):
+        for stock in stocks_to_update:
+            share = Share(stock)
+            file_name = original_date+'_'+stock+'.txt'
+            with open('purchases/%s' % file_name, 'a') as log:
+                log.write('\n' + get_date()+'Keeping %s at %s' % (stock, share.get_price()))
